@@ -131,25 +131,29 @@ namespace VmdkZeroFree
             outputDiskImage.ExclusiveLock();
 
             TrimmableDisk workDisk = new TrimmableDisk(inputDiskImage, BlockSizeInSectors);
-            MasterBootRecord mbr = new MasterBootRecord(workDisk.ReadSector(0));
-            
+            TrimUnusedBlocks(workDisk);
+            Copy(workDisk, 0, outputDiskImage, 0, workDisk.TotalSectors);
+
+            inputDiskImage.ReleaseLock();
+            outputDiskImage.ReleaseLock();
+        }
+
+        private static void TrimUnusedBlocks(TrimmableDisk disk)
+        {
+            MasterBootRecord mbr = new MasterBootRecord(disk.ReadSector(0));
             for (int partitionTableEntryIndex = 0; partitionTableEntryIndex < 4; partitionTableEntryIndex++)
             {
                 PartitionTableEntry partitionTableEntry = mbr.PartitionTable[partitionTableEntryIndex];
                 if (partitionTableEntry.PartitionType == LinuxRaidPartitionType ||
                     partitionTableEntry.PartitionType == Ext2PartitionType)
                 {
-                    DiskExtent volumeData = LinuxLvmHelper.GetUnderlyingVolumeData(workDisk, partitionTableEntry);
+                    DiskExtent volumeData = LinuxLvmHelper.GetUnderlyingVolumeData(disk, partitionTableEntry);
                     if (volumeData.TotalSectors > 0)
                     {
                         TrimUnusedBlocks(volumeData);
                     }
                 }
             }
-
-            Copy(workDisk, 0, outputDiskImage, 0, workDisk.TotalSectors);
-            inputDiskImage.ReleaseLock();
-            outputDiskImage.ReleaseLock();
         }
 
         private static void TrimUnusedBlocks(DiskExtent volumeData)
