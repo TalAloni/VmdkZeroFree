@@ -1,0 +1,1 @@
+dotnet publish VmdkZeroFree.csproj -r linux-x64 -c Release --self-contained=true /p:PublishSingleFile=true /p:PublishTrimmed=true
