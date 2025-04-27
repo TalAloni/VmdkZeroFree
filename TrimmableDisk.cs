@@ -86,6 +86,40 @@ namespace VmdkZeroFree
             }
         }
 
+        /// <returns>null if partially trimmable</returns>
+        public bool? IsTrimmable(long sectorIndex, int sectorCount)
+        {
+            int blockCount = sectorCount / m_trimmableBlockSizeInSectors;
+            int firstBlockIndex = (int)(sectorIndex / m_trimmableBlockSizeInSectors);
+            bool isCompletelyTrimmable = true;
+            bool isPartiallyTrimmable = false;
+            for (int offset = 0; offset < blockCount; offset++)
+            {
+                if (!IsBitClear(m_bitmap, firstBlockIndex + offset))
+                {
+                    isCompletelyTrimmable &= true;
+                    isPartiallyTrimmable = true;
+                }
+                else
+                {
+                    isCompletelyTrimmable = false;
+                }
+            }
+
+            if (isCompletelyTrimmable)
+            {
+                return true;
+            }
+            else if (isPartiallyTrimmable)
+            {
+                return null;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
         public override void WriteSectors(long sectorIndex, byte[] data)
         {
             throw new NotSupportedException();

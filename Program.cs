@@ -108,21 +108,30 @@ namespace VmdkZeroFree
         private static void TrimUnusedBlocks(string sourcePath, string outputPath, VirtualMachineDiskType diskType, bool useFastestCompression)
         {
             VirtualMachineDisk inputDiskImage = new VirtualMachineDisk(sourcePath);
-            VirtualMachineDisk outputDiskImage;
-            if (diskType == VirtualMachineDiskType.MonolithicSparse)
+            if (inputDiskImage.DiskType == VirtualMachineDiskType.StreamOptimized &&
+                diskType == VirtualMachineDiskType.StreamOptimized &&
+                useFastestCompression)
             {
-                outputDiskImage = VirtualMachineDisk.CreateMonolithicSparse(outputPath, inputDiskImage.Size);
-            }
-            else if (diskType == VirtualMachineDiskType.MonolithicFlat)
-            {
-                outputDiskImage = VirtualMachineDisk.CreateMonolithicFlat(outputPath, inputDiskImage.Size);
+                TrimStreamOptimizedVmdk(inputDiskImage, outputPath);
             }
             else
             {
-                outputDiskImage = VirtualMachineDisk.CreateStreamOptimized(outputPath, inputDiskImage.Size, useFastestCompression);
+                VirtualMachineDisk outputDiskImage;
+                if (diskType == VirtualMachineDiskType.MonolithicSparse)
+                {
+                    outputDiskImage = VirtualMachineDisk.CreateMonolithicSparse(outputPath, inputDiskImage.Size);
+                }
+                else if (diskType == VirtualMachineDiskType.MonolithicFlat)
+                {
+                    outputDiskImage = VirtualMachineDisk.CreateMonolithicFlat(outputPath, inputDiskImage.Size);
+                }
+                else
+                {
+                    outputDiskImage = VirtualMachineDisk.CreateStreamOptimized(outputPath, inputDiskImage.Size, useFastestCompression);
+                }
+
+                TrimUnusedBlocks(inputDiskImage, outputDiskImage);
             }
-            
-            TrimUnusedBlocks(inputDiskImage, outputDiskImage);
         }
 
         private static void TrimUnusedBlocks(VirtualMachineDisk inputDiskImage, VirtualMachineDisk outputDiskImage)
@@ -188,6 +197,26 @@ namespace VmdkZeroFree
                     stopwatch.Restart();
                 }
             }
+        }
+
+        public static void TrimStreamOptimizedVmdk(VirtualMachineDisk inputDiskImage, string outputPath)
+        {
+            TrimmableDisk workDisk = new TrimmableDisk(inputDiskImage, BlockSizeInSectors);
+            inputDiskImage.ExclusiveLock();
+            TrimUnusedBlocks(workDisk);
+            inputDiskImage.ReleaseLock();
+
+            RawDiskImage inputDisk = new RawDiskImage(inputDiskImage.Path, true);
+            inputDisk.ExclusiveLock();
+            DiskImageReader inputDiskReader = new DiskImageReader(inputDisk);
+
+            DiskImage outputDisk = RawDiskImage.Create(outputPath, 0);
+            outputDisk.ExclusiveLock();
+            DiskImageWriter outputDiskWriter = new DiskImageWriter(outputDisk);
+            StreamOptimizedVmdkTrimmer.CopyStreamOptimizedVmdk(inputDiskReader, workDisk, outputDiskWriter);
+
+            inputDisk.ReleaseLock();
+            outputDisk.ReleaseLock();
         }
     }
 }
