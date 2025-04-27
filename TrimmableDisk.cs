@@ -32,6 +32,11 @@ namespace VmdkZeroFree
         public override byte[] ReadSectors(long sectorIndex, int sectorCount)
         {
             byte[] data = m_underlyingDisk.ReadSectors(sectorIndex, sectorCount);
+            return ApplyTrim(data, sectorIndex, sectorCount);
+        }
+
+        internal byte[] ApplyTrim(byte[] data, long sectorIndex, int sectorCount)
+        {
             int blockCount = sectorCount / m_trimmableBlockSizeInSectors;
             int firstBlockIndex = (int)(sectorIndex / m_trimmableBlockSizeInSectors);
             int blockSizeInBytes = m_trimmableBlockSizeInSectors * m_underlyingDisk.BytesPerSector;
