@@ -71,11 +71,22 @@ namespace VmdkZeroFree
             }
 
             Stopwatch stopwatch = Stopwatch.StartNew();
-            int count = TrimUnusedBlocks(sourcePath, outputPath, diskType, useFastestCompression);
+            TrimUnusedBlocks(sourcePath, outputPath, diskType, useFastestCompression);
             stopwatch.Stop();
-            long bytesFreed = (long)count * BlockSizeInSectors * VirtualHardDisk.BytesPerDiskSector;
-            int megaBytesFreed = (int)(bytesFreed / 1024 / 1024);
-            Console.WriteLine($"Took {(int)stopwatch.Elapsed.TotalSeconds} seconds, {megaBytesFreed.ToString("#,###0")} MiB were freed ({count} blocks)");
+            long sizeBeforeInMb = new FileInfo(sourcePath).Length / 1024 / 1024;
+            long sizeAfterInMb = new FileInfo(outputPath).Length / 1024 / 1024;
+
+            string status = $"Took {(int)stopwatch.Elapsed.TotalSeconds} seconds.";
+            if (!Console.IsOutputRedirected)
+            {
+                Console.WriteLine(status.PadRight(Console.WindowWidth - 1));
+            }
+            else
+            {
+                Console.WriteLine(status);
+            }
+            Console.WriteLine($"Input size: {sizeBeforeInMb.ToString("#,##0")} MB");
+            Console.WriteLine($"Output size: {sizeAfterInMb.ToString("#,##0")} MB");
             return 0;
         }
 
@@ -94,7 +105,7 @@ namespace VmdkZeroFree
             }
         }
 
-        private static int TrimUnusedBlocks(string sourcePath, string outputPath, VirtualMachineDiskType diskType, bool useFastestCompression)
+        private static void TrimUnusedBlocks(string sourcePath, string outputPath, VirtualMachineDiskType diskType, bool useFastestCompression)
         {
             VirtualMachineDisk inputDiskImage = new VirtualMachineDisk(sourcePath);
             VirtualMachineDisk outputDiskImage;
@@ -111,12 +122,11 @@ namespace VmdkZeroFree
                 outputDiskImage = VirtualMachineDisk.CreateStreamOptimized(outputPath, inputDiskImage.Size, useFastestCompression);
             }
             
-            return TrimUnusedBlocks(inputDiskImage, outputDiskImage);
+            TrimUnusedBlocks(inputDiskImage, outputDiskImage);
         }
 
-        private static int TrimUnusedBlocks(VirtualMachineDisk inputDiskImage, VirtualMachineDisk outputDiskImage)
+        private static void TrimUnusedBlocks(VirtualMachineDisk inputDiskImage, VirtualMachineDisk outputDiskImage)
         {
-            int result = 0;
             inputDiskImage.ExclusiveLock();
             outputDiskImage.ExclusiveLock();
 
@@ -132,7 +142,7 @@ namespace VmdkZeroFree
                     DiskExtent volumeData = LinuxLvmHelper.GetUnderlyingVolumeData(workDisk, partitionTableEntry);
                     if (volumeData.TotalSectors > 0)
                     {
-                        result += TrimUnusedBlocks(volumeData);
+                        TrimUnusedBlocks(volumeData);
                     }
                 }
             }
@@ -140,22 +150,16 @@ namespace VmdkZeroFree
             Copy(workDisk, 0, outputDiskImage, 0, workDisk.TotalSectors);
             inputDiskImage.ReleaseLock();
             outputDiskImage.ReleaseLock();
-
-            return result;
         }
 
-        private static int TrimUnusedBlocks(DiskExtent volumeData)
+        private static void TrimUnusedBlocks(DiskExtent volumeData)
         {
             byte[] buffer = volumeData.ReadSectors(2, 2);
             Ext4SuperBlock superBlock = Ext4SuperBlock.ReadExt4SuperBlock(buffer);
             if (superBlock != null)
             {
                 Ext4Processor.TrimUnusedBlocks(volumeData, superBlock);
-                int count = ((TrimmableDisk)volumeData.Disk).GetCountOfTrimmableBlocks();
-                return count;
             }
-
-            return 0;
         }
 
         private static void Copy(Disk disk1, long disk1Offset, Disk disk2, long disk2Offset, long sectorCount)

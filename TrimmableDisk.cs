@@ -104,19 +104,5 @@ namespace VmdkZeroFree
             int bitOffsetInByte = bitOffsetInBitmap % 8;
             bitmap[byteOffset] |= (byte)(0x01 << bitOffsetInByte);
         }
-
-        public int GetCountOfTrimmableBlocks()
-        {
-            int result = 0;
-            for (int bitIndex = 0; bitIndex < m_bitmap.Length * 8; bitIndex++)
-            {
-                if (!IsBitClear(m_bitmap, bitIndex))
-                {
-                    result++;
-                }
-            }
-
-            return result;
-        }
     }
 }

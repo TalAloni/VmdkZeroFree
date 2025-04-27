@@ -8,7 +8,6 @@ using DiskAccessLibrary;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using Utilities;
 
 namespace VmdkZeroFree.Ext4
 {
@@ -34,7 +33,6 @@ namespace VmdkZeroFree.Ext4
             int dataReadSizeInBlocks = 2048 * 512 / superBlock.BlockSize; // 1MiB, 256 x 4KiB (16 grains)
             List<BlockGroupDescriptor> descriptors = ReadBlockGroupDescriptors(volume, superBlock);
             int numberOfBlocksInLastGroup = (int)(superBlock.BlocksCount - (descriptors.Count - 1) * superBlock.BlocksPerGroup);
-            int blockSizeInBytes = superBlock.BlockSize;
             int blockSizeInSectors = superBlock.BlockSize / volume.BytesPerSector;
             Stopwatch stopwatch = Stopwatch.StartNew();
             for (int groupIndex = 0; groupIndex < descriptors.Count; groupIndex++)
@@ -59,29 +57,19 @@ namespace VmdkZeroFree.Ext4
                 
                 for (int blockIndexInGroup = 0; blockIndexInGroup < blocksInGroup; blockIndexInGroup += dataReadSizeInBlocks)
                 {
-                    byte[] chunkData = null;
-
                     ulong blockIndexInVolume = (ulong)groupIndex * superBlock.BlocksPerGroup + (uint)blockIndexInGroup;
                     long sectorIndexInVolume = (long)blockIndexInVolume * blockSizeInSectors;
                     for (int blockoffset = 0; blockoffset < dataReadSizeInBlocks; blockoffset++)
                     {
                         if (IsBitClear(groupBitmap, blockIndexInGroup + blockoffset))
                         {
-                            if (chunkData == null)
+                            if (volume.Disk is TrimmableDisk disk)
                             {
-                                chunkData = volume.ReadSectors(sectorIndexInVolume, dataReadSizeInBlocks * blockSizeInSectors);
+                                disk.TrimBlocks(volume.FirstSector + sectorIndexInVolume + blockoffset * blockSizeInSectors, blockSizeInSectors);
                             }
-
-                            if (!ByteUtils.IsAllZeros(chunkData, blockoffset * blockSizeInBytes, blockSizeInBytes))
+                            else
                             {
-                                if (volume.Disk is TrimmableDisk disk)
-                                {
-                                    disk.TrimBlocks(volume.FirstSector + sectorIndexInVolume + blockoffset * blockSizeInSectors, blockSizeInSectors);
-                                }
-                                else
-                                {
-                                    throw new NotSupportedException();
-                                }
+                                throw new NotSupportedException();
                             }
                         }
                     }
