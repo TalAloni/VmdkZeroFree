@@ -107,7 +107,7 @@ namespace VmdkZeroFree
 
         private static void TrimUnusedBlocks(string sourcePath, string outputPath, VirtualMachineDiskType diskType, bool useFastestCompression)
         {
-            VirtualMachineDisk inputDiskImage = new VirtualMachineDisk(sourcePath);
+            VirtualMachineDisk inputDiskImage = new VirtualMachineDisk(sourcePath, true);
             if (inputDiskImage.DiskType == VirtualMachineDiskType.StreamOptimized &&
                 diskType == VirtualMachineDiskType.StreamOptimized &&
                 useFastestCompression)
