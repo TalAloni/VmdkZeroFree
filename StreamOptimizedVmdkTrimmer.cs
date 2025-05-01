@@ -7,6 +7,7 @@
 using DiskAccessLibrary.VMDK;
 using System;
 using System.Diagnostics;
+using System.Threading;
 using Utilities;
 
 namespace VmdkZeroFree
@@ -14,6 +15,7 @@ namespace VmdkZeroFree
     public static class StreamOptimizedVmdkTrimmer
     {
         private const int BytesPerSector = 512;
+        private const int QueueSize = 256;
 
         private const uint MarkerEOS = 0;
         private const uint MarkerGT = 1;
@@ -36,19 +38,21 @@ namespace VmdkZeroFree
             int indexOfNextGrainTableToWrite = 0;
             long grainDirectorySectorIndex = 0;
 
+            BlockingQueue<byte[]> processingQueue = new BlockingQueue<byte[]>();
+            new Thread(delegate()
+                {
+                    FillProcessingQueue(inputDiskReader, processingQueue);
+                }
+            ).Start();
+
             Stopwatch stopwatch = Stopwatch.StartNew();
-            while (inputDiskReader.Position < inputDiskReader.TotalSectors)
+            while (processingQueue.TryDequeue(out byte[] data))
             {
-                byte[] sectorBytes = inputDiskReader.ReadSector();
-                uint compressedSize = LittleEndianConverter.ToUInt32(sectorBytes, 8);
+                uint compressedSize = LittleEndianConverter.ToUInt32(data, 8);
                 if (compressedSize > 0)
                 {
-                    ulong lba = LittleEndianConverter.ToUInt32(sectorBytes, 0);
-
+                    ulong lba = LittleEndianConverter.ToUInt32(data, 0);
                     int grainMarkerSize = 12;
-                    int sizeInBytes = grainMarkerSize + (int)compressedSize;
-                    int sizeInSectors = (int)Math.Ceiling((double)sizeInBytes / 512);
-                    byte[] data = ByteUtils.Concatenate(sectorBytes, inputDiskReader.ReadSectors(sizeInSectors - 1));
 
                     long grainIndex = (long)(lba / header.GrainSize);
                     int grainTableIndex = (int)(grainIndex / header.NumGTEsPerGT); // The index in the grain directory
@@ -88,7 +92,7 @@ namespace VmdkZeroFree
                         {
                             byte[] decompressedData = ZLibCompressionHelper.Decompress(data, grainMarkerSize, (int)compressedSize, (int)header.GrainSize * 512);
                             byte[] trimmedData = workDisk.ApplyTrim(decompressedData, (long)lba, (int)header.GrainSize);
-                            bool useFastestCompression = (sectorBytes[grainMarkerSize + 1] == 0x01);
+                            bool useFastestCompression = (data[grainMarkerSize + 1] == 0x01);
                             byte[] compressedBytes = ZLibCompressionHelper.Compress(trimmedData, 0, trimmedData.Length, useFastestCompression);
 
                             byte[] grainBytes = GetGrainBytes((long)lba, compressedBytes);
@@ -110,9 +114,8 @@ namespace VmdkZeroFree
                 }
                 else
                 {
-                    uint type = LittleEndianConverter.ToUInt32(sectorBytes, 12);
-                    ulong sizeInSectors = LittleEndianConverter.ToUInt64(sectorBytes, 0);
-                    byte[] data = inputDiskReader.ReadSectors((int)sizeInSectors);
+                    uint type = LittleEndianConverter.ToUInt32(data, 12);
+                    ulong sizeInSectors = LittleEndianConverter.ToUInt64(data, 0);
                     // Note: We ignore grain tables and write our own
                     
                     if (type == MarkerGD)
@@ -133,17 +136,46 @@ namespace VmdkZeroFree
                     else if (type == MarkerFooter)
                     {
                         header.GDOffset = (ulong)grainDirectorySectorIndex;
-                        outputDiskWriter.Write(sectorBytes);
+                        outputDiskWriter.Write(ByteReader.ReadBytes(data, 0, BytesPerSector));
                         outputDiskWriter.Write(header.GetBytes());
                     }
                     else if (type == MarkerEOS)
                     {
-                        outputDiskWriter.Write(sectorBytes);
+                        outputDiskWriter.Write(data);
                     }
                 }
             }
 
             outputDiskWriter.Flush();
+        }
+
+        private static void FillProcessingQueue(DiskImageReader inputDiskReader, BlockingQueue<byte[]> processingQueue)
+        {
+            while (inputDiskReader.Position < inputDiskReader.TotalSectors)
+            {
+                while (processingQueue.Count > QueueSize)
+                {
+                    Thread.Sleep(1);
+                }
+                byte[] sectorBytes = inputDiskReader.ReadSector();
+                uint compressedSize = LittleEndianConverter.ToUInt32(sectorBytes, 8);
+                int additionalNumberOfSectorsToRead;
+                if (compressedSize > 0)
+                {
+                    int grainMarkerSize = 12;
+                    int sizeInBytes = grainMarkerSize + (int)compressedSize;
+                    int sizeInSectors = (int)Math.Ceiling((double)sizeInBytes / 512);
+                    additionalNumberOfSectorsToRead = sizeInSectors - 1;
+                }
+                else
+                {
+                    additionalNumberOfSectorsToRead = (int)LittleEndianConverter.ToUInt64(sectorBytes, 0);
+                }
+                byte[] data = ByteUtils.Concatenate(sectorBytes, inputDiskReader.ReadSectors(additionalNumberOfSectorsToRead));
+                processingQueue.Enqueue(data);
+            }
+
+            processingQueue.Stop();
         }
 
         private static void WriteGrainTable(DiskImageWriter diskImageWriter, byte[] grainTable)
