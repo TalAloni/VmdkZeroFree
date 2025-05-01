@@ -172,6 +172,7 @@ namespace VmdkZeroFree
             XfsSuperBlock xfsSuperBlock = XfsSuperBlock.ReadXfsSuperBlock(buffer);
             if (xfsSuperBlock != null)
             {
+                Console.WriteLine($"XFS file system detected at lba {volumeData.FirstSector}");
                 XfsProcessor.TrimUnusedBlocks(volumeData, xfsSuperBlock);
                 return;
             }
@@ -180,6 +181,7 @@ namespace VmdkZeroFree
             Ext4SuperBlock ext4SuperBlock = Ext4SuperBlock.ReadExt4SuperBlock(buffer);
             if (ext4SuperBlock != null)
             {
+                Console.WriteLine($"EXT file system detected at lba {volumeData.FirstSector}");
                 Ext4Processor.TrimUnusedBlocks(volumeData, ext4SuperBlock);
             }
         }
