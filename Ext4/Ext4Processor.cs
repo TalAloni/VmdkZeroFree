@@ -11,7 +11,7 @@ using System.Diagnostics;
 
 namespace VmdkZeroFree.Ext4
 {
-    public class Ext4Processor
+    public static class Ext4Processor
     {
         public static void TrimUnusedBlocks(DiskExtent volume)
         {
@@ -27,7 +27,6 @@ namespace VmdkZeroFree.Ext4
             }
         }
 
-        /// <returns>If bit is set it means the block should be zeroed-out</returns>
         public static void TrimUnusedBlocks(DiskExtent volume, Ext4SuperBlock superBlock)
         {
             int dataReadSizeInBlocks = 2048 * 512 / superBlock.BlockSize; // 1MiB, 256 x 4KiB (16 grains)
