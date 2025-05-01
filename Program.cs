@@ -168,10 +168,10 @@ namespace VmdkZeroFree
         private static void TrimUnusedBlocks(DiskExtent volumeData)
         {
             byte[] buffer = volumeData.ReadSectors(2, 2);
-            Ext4SuperBlock superBlock = Ext4SuperBlock.ReadExt4SuperBlock(buffer);
-            if (superBlock != null)
+            Ext4SuperBlock ext4SuperBlock = Ext4SuperBlock.ReadExt4SuperBlock(buffer);
+            if (ext4SuperBlock != null)
             {
-                Ext4Processor.TrimUnusedBlocks(volumeData, superBlock);
+                Ext4Processor.TrimUnusedBlocks(volumeData, ext4SuperBlock);
             }
         }
 
