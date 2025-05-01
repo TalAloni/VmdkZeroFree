@@ -10,6 +10,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using VmdkZeroFree.Ext4;
+using VmdkZeroFree.Xfs;
 
 namespace VmdkZeroFree
 {
@@ -167,7 +168,15 @@ namespace VmdkZeroFree
 
         private static void TrimUnusedBlocks(DiskExtent volumeData)
         {
-            byte[] buffer = volumeData.ReadSectors(2, 2);
+            byte[] buffer = volumeData.ReadSector(0);
+            XfsSuperBlock xfsSuperBlock = XfsSuperBlock.ReadXfsSuperBlock(buffer);
+            if (xfsSuperBlock != null)
+            {
+                XfsProcessor.TrimUnusedBlocks(volumeData, xfsSuperBlock);
+                return;
+            }
+
+            buffer = volumeData.ReadSectors(2, 2);
             Ext4SuperBlock ext4SuperBlock = Ext4SuperBlock.ReadExt4SuperBlock(buffer);
             if (ext4SuperBlock != null)
             {

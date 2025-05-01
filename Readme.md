@@ -1,6 +1,6 @@
 VmdkZeroFree:
 ===================
-VmdkZeroFree is an open-source C# tool allowing you to reduce VMDK file size by zeroing-out blocks that are marked by an EXT2/EXT3/EXT4 file-system as unused.  
+VmdkZeroFree is an open-source C# tool allowing you to reduce VMDK file size by zeroing-out blocks that are marked by an EXT2/EXT3/EXT4/XFS file-system as unused.  
 
 Features:  
 * Cross-Platform (Both Windows and Linux are supported)  
