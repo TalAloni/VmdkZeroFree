@@ -16,7 +16,7 @@ namespace VmdkZeroFree
     public class Program
     {
         private const byte LinuxRaidPartitionType = 0xFD;
-        private const byte Ext2PartitionType = 0x83;
+        private const byte LinuxNativePartitionType = 0x83; // EXT2/EXT3/EXT4/XFS
         private const int BlockSizeInSectors = 8;
 
         static int Main(string[] args)
@@ -154,7 +154,7 @@ namespace VmdkZeroFree
             {
                 PartitionTableEntry partitionTableEntry = mbr.PartitionTable[partitionTableEntryIndex];
                 if (partitionTableEntry.PartitionType == LinuxRaidPartitionType ||
-                    partitionTableEntry.PartitionType == Ext2PartitionType)
+                    partitionTableEntry.PartitionType == LinuxNativePartitionType)
                 {
                     DiskExtent volumeData = LinuxLvmHelper.GetUnderlyingVolumeData(disk, partitionTableEntry);
                     if (volumeData.TotalSectors > 0)
