@@ -9,6 +9,8 @@ using DiskAccessLibrary.VMDK;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
+using Utilities;
 using VmdkZeroFree.Ext4;
 using VmdkZeroFree.Xfs;
 
@@ -19,6 +21,7 @@ namespace VmdkZeroFree
         private const byte LinuxRaidPartitionType = 0xFD;
         private const byte LinuxNativePartitionType = 0x83; // EXT2/EXT3/EXT4/XFS
         private const int BlockSizeInSectors = 8;
+        private const int QueueSize = 16;
 
         static int Main(string[] args)
         {
@@ -188,15 +191,19 @@ namespace VmdkZeroFree
 
         private static void Copy(Disk disk1, long disk1Offset, Disk disk2, long disk2Offset, long sectorCount)
         {
-            int readSizeInSectors = 2048;
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            for (long index = 0; index < sectorCount; index += readSizeInSectors)
+            BlockingQueue<byte[]> writeQueue = new BlockingQueue<byte[]>();
+            new Thread(delegate ()
             {
-                long sectorsLeftToRead = sectorCount - index;
-                int sectorsToRead = (int)Math.Min(readSizeInSectors, sectorsLeftToRead);
-                byte[] data = disk1.ReadSectors(disk1Offset + index, sectorsToRead);
-                disk2.WriteSectors(disk2Offset + index, data);
-                string status = $"Written {index * disk1.BytesPerSector / 1024 / 1024} MB to virtual disk";
+                Copy(disk1, disk1Offset, sectorCount, writeQueue);
+            }).Start();
+
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            long writeOffset = 0;
+            while (writeQueue.TryDequeue(out byte[] data))
+            {
+                disk2.WriteSectors(disk2Offset + writeOffset, data);
+                writeOffset += data.Length / disk1.BytesPerSector;
+                string status = $"Written {writeOffset * disk1.BytesPerSector / 1024 / 1024} MB to virtual disk";
                 if (!Console.IsOutputRedirected)
                 {
                     Console.WriteLine(status.PadRight(Console.WindowWidth - 1));
@@ -208,6 +215,24 @@ namespace VmdkZeroFree
                     stopwatch.Restart();
                 }
             }
+        }
+
+        private static void Copy(Disk disk1, long disk1Offset, long sectorCount, BlockingQueue<byte[]> writeQueue)
+        {
+            int readSizeInSectors = 2048;
+            for (long index = 0; index < sectorCount; index += readSizeInSectors)
+            {
+                while (writeQueue.Count > QueueSize)
+                {
+                    Thread.Sleep(1);
+                }
+                long sectorsLeftToRead = sectorCount - index;
+                int sectorsToRead = (int)Math.Min(readSizeInSectors, sectorsLeftToRead);
+                byte[] data = disk1.ReadSectors(disk1Offset + index, sectorsToRead);
+                writeQueue.Enqueue(data);
+            }
+
+            writeQueue.Stop();
         }
 
         public static void TrimStreamOptimizedVmdk(VirtualMachineDisk inputDiskImage, string outputPath)
