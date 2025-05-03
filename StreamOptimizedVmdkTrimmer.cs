@@ -31,13 +31,6 @@ namespace VmdkZeroFree
             byte[] metadata = ByteUtils.Concatenate(headerBytes, inputDiskReader.ReadSectors(dataStartSector - 1));
             outputDiskWriter.Write(metadata);
 
-            ulong numberOfGrains = header.Capacity / header.GrainSize;
-            int numberOfGrainTables = (int)Math.Ceiling((double)numberOfGrains / header.NumGTEsPerGT);
-            byte[] grainDirectory = new byte[numberOfGrainTables * 4];
-            byte[] nextGrainTable = null;
-            int indexOfNextGrainTableToWrite = 0;
-            long grainDirectorySectorIndex = 0;
-
             BlockingQueue<byte[]> processingQueue = new BlockingQueue<byte[]>();
             new Thread(delegate()
                 {
@@ -45,104 +38,27 @@ namespace VmdkZeroFree
                 }
             ).Start();
 
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            while (processingQueue.TryDequeue(out byte[] data))
+            BlockingQueue<byte[]> writeQueue = new BlockingQueue<byte[]>();
+            new Thread(delegate ()
             {
-                uint compressedSize = LittleEndianConverter.ToUInt32(data, 8);
-                if (compressedSize > 0)
+                CopyStreamOptimizedVmdkData(header, processingQueue, workDisk, writeQueue);
+            }
+            ).Start();
+
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            while (writeQueue.TryDequeue(out byte[] data))
+            {
+                outputDiskWriter.Write(data);
+                string status = $"Written {outputDiskWriter.Position * BytesPerSector / 1024 / 1024} MB to VMDK";
+                if (!Console.IsOutputRedirected)
                 {
-                    ulong lba = LittleEndianConverter.ToUInt32(data, 0);
-                    int grainMarkerSize = 12;
-
-                    long grainIndex = (long)(lba / header.GrainSize);
-                    int grainTableIndex = (int)(grainIndex / header.NumGTEsPerGT); // The index in the grain directory
-                    if (grainTableIndex > indexOfNextGrainTableToWrite)
-                    {
-                        // Commit grain table
-                        if (nextGrainTable != null)
-                        {
-                            // The grain directory entry points to the table, not the marker
-                            LittleEndianWriter.WriteUInt32(grainDirectory, indexOfNextGrainTableToWrite * 4, (uint)outputDiskWriter.Position + 1);
-
-                            WriteGrainTable(outputDiskWriter, nextGrainTable);
-                            nextGrainTable = null;
-                        }
-
-                        indexOfNextGrainTableToWrite = grainTableIndex;
-                    }
-
-                    bool? trimStatus = workDisk.IsTrimmable((long)lba, (int)header.GrainSize);
-                    bool isCopiedAsIs = trimStatus.HasValue && !trimStatus.Value;
-                    bool isPartialTrim = !trimStatus.HasValue;
-                    if (isCopiedAsIs || isPartialTrim)
-                    {
-                        if (nextGrainTable == null)
-                        {
-                            nextGrainTable = new byte[(int)header.NumGTEsPerGT * 4];
-                        }
-                        
-                        int grainIndexInGrainTable = (int)(grainIndex % header.NumGTEsPerGT);
-                        LittleEndianWriter.WriteUInt32(nextGrainTable, grainIndexInGrainTable * 4, (uint)outputDiskWriter.Position);
-
-                        if (isCopiedAsIs)
-                        {
-                            outputDiskWriter.Write(data);
-                        }
-                        else if (isPartialTrim)
-                        {
-                            byte[] decompressedData = ZLibCompressionHelper.Decompress(data, grainMarkerSize, (int)compressedSize, (int)header.GrainSize * 512);
-                            byte[] trimmedData = workDisk.ApplyTrim(decompressedData, (long)lba, (int)header.GrainSize);
-                            bool useFastestCompression = (data[grainMarkerSize + 1] == 0x01);
-                            byte[] compressedBytes = ZLibCompressionHelper.Compress(trimmedData, 0, trimmedData.Length, useFastestCompression);
-
-                            byte[] grainBytes = GetGrainBytes((long)lba, compressedBytes);
-                            outputDiskWriter.Write(grainBytes);
-                        }
-                    }
-
-                    string status = $"Written {lba * BytesPerSector / 1024 / 1024} MB to virtual disk";
-                    if (!Console.IsOutputRedirected)
-                    {
-                        Console.WriteLine(status.PadRight(Console.WindowWidth - 1));
-                        Console.SetCursorPosition(0, Console.CursorTop - 1);
-                    }
-                    else if (stopwatch.Elapsed.Seconds > 5)
-                    {
-                        Console.WriteLine(status);
-                        stopwatch.Restart();
-                    }
+                    Console.WriteLine(status.PadRight(Console.WindowWidth - 1));
+                    Console.SetCursorPosition(0, Console.CursorTop - 1);
                 }
-                else
+                else if (stopwatch.Elapsed.Seconds > 5)
                 {
-                    uint type = LittleEndianConverter.ToUInt32(data, 12);
-                    ulong sizeInSectors = LittleEndianConverter.ToUInt64(data, 0);
-                    // Note: We ignore grain tables and write our own
-                    
-                    if (type == MarkerGD)
-                    {
-                        if (nextGrainTable != null)
-                        {
-                            // The grain directory entry points to the table, not the marker
-                            LittleEndianWriter.WriteUInt32(grainDirectory,indexOfNextGrainTableToWrite * 4, (uint)outputDiskWriter.Position + 1);
-
-                            WriteGrainTable(outputDiskWriter, nextGrainTable);
-                            nextGrainTable = null;
-                        }
-
-                        // GDOffset points to the grain directory, not the marker
-                        grainDirectorySectorIndex = outputDiskWriter.Position + 1;
-                        WriteGrainDirectory(outputDiskWriter, grainDirectory);
-                    }
-                    else if (type == MarkerFooter)
-                    {
-                        header.GDOffset = (ulong)grainDirectorySectorIndex;
-                        outputDiskWriter.Write(ByteReader.ReadBytes(data, 0, BytesPerSector));
-                        outputDiskWriter.Write(header.GetBytes());
-                    }
-                    else if (type == MarkerEOS)
-                    {
-                        outputDiskWriter.Write(data);
-                    }
+                    Console.WriteLine(status);
+                    stopwatch.Restart();
                 }
             }
 
@@ -178,17 +94,127 @@ namespace VmdkZeroFree
             processingQueue.Stop();
         }
 
-        private static void WriteGrainTable(DiskImageWriter diskImageWriter, byte[] grainTable)
+        private static void CopyStreamOptimizedVmdkData(SparseExtentHeader header, BlockingQueue<byte[]> processingQueue, TrimmableDisk workDisk, BlockingQueue<byte[]> writeQueue)
+        {
+            ulong numberOfGrains = header.Capacity / header.GrainSize;
+            int numberOfGrainTables = (int)Math.Ceiling((double)numberOfGrains / header.NumGTEsPerGT);
+            byte[] grainDirectory = new byte[numberOfGrainTables * 4];
+            byte[] nextGrainTable = null;
+            int indexOfNextGrainTableToWrite = 0;
+            long grainDirectorySectorIndex = 0;
+            long position = (long)header.OverHead;
+
+            while (processingQueue.TryDequeue(out byte[] data))
+            {
+                uint compressedSize = LittleEndianConverter.ToUInt32(data, 8);
+                if (compressedSize > 0)
+                {
+                    ulong lba = LittleEndianConverter.ToUInt32(data, 0);
+                    int grainMarkerSize = 12;
+
+                    long grainIndex = (long)(lba / header.GrainSize);
+                    int grainTableIndex = (int)(grainIndex / header.NumGTEsPerGT); // The index in the grain directory
+                    if (grainTableIndex > indexOfNextGrainTableToWrite)
+                    {
+                        // Commit grain table
+                        if (nextGrainTable != null)
+                        {
+                            // The grain directory entry points to the table, not the marker
+                            LittleEndianWriter.WriteUInt32(grainDirectory, indexOfNextGrainTableToWrite * 4, (uint)position + 1);
+
+                            WriteGrainTable(writeQueue, nextGrainTable, ref position);
+                            nextGrainTable = null;
+                        }
+
+                        indexOfNextGrainTableToWrite = grainTableIndex;
+                    }
+
+                    bool? trimStatus = workDisk.IsTrimmable((long)lba, (int)header.GrainSize);
+                    bool isCopiedAsIs = trimStatus.HasValue && !trimStatus.Value;
+                    bool isPartialTrim = !trimStatus.HasValue;
+                    if (isCopiedAsIs || isPartialTrim)
+                    {
+                        if (nextGrainTable == null)
+                        {
+                            nextGrainTable = new byte[(int)header.NumGTEsPerGT * 4];
+                        }
+
+                        int grainIndexInGrainTable = (int)(grainIndex % header.NumGTEsPerGT);
+                        LittleEndianWriter.WriteUInt32(nextGrainTable, grainIndexInGrainTable * 4, (uint)position);
+
+                        if (isCopiedAsIs)
+                        {
+                            EnqueueWrite(writeQueue, data, ref position);
+                        }
+                        else if (isPartialTrim)
+                        {
+                            byte[] decompressedData = ZLibCompressionHelper.Decompress(data, grainMarkerSize, (int)compressedSize, (int)header.GrainSize * 512);
+                            byte[] trimmedData = workDisk.ApplyTrim(decompressedData, (long)lba, (int)header.GrainSize);
+                            bool useFastestCompression = (data[grainMarkerSize + 1] == 0x01);
+                            byte[] compressedBytes = ZLibCompressionHelper.Compress(trimmedData, 0, trimmedData.Length, useFastestCompression);
+
+                            byte[] grainBytes = GetGrainBytes((long)lba, compressedBytes);
+                            EnqueueWrite(writeQueue, grainBytes, ref position);
+                        }
+                    }
+                }
+                else
+                {
+                    uint type = LittleEndianConverter.ToUInt32(data, 12);
+                    
+                    // Note: We ignore grain tables and write our own
+                    if (type == MarkerGD)
+                    {
+                        if (nextGrainTable != null)
+                        {
+                            // The grain directory entry points to the table, not the marker
+                            LittleEndianWriter.WriteUInt32(grainDirectory, indexOfNextGrainTableToWrite * 4, (uint)position + 1);
+
+                            WriteGrainTable(writeQueue, nextGrainTable, ref position);
+                            nextGrainTable = null;
+                        }
+
+                        // GDOffset points to the grain directory, not the marker
+                        grainDirectorySectorIndex = position + 1;
+                        WriteGrainDirectory(writeQueue, grainDirectory, ref position);
+                    }
+                    else if (type == MarkerFooter)
+                    {
+                        header.GDOffset = (ulong)grainDirectorySectorIndex;
+                        EnqueueWrite(writeQueue, ByteReader.ReadBytes(data, 0, BytesPerSector), ref position);
+                        EnqueueWrite(writeQueue, header.GetBytes(), ref position);
+                    }
+                    else if (type == MarkerEOS)
+                    {
+                        EnqueueWrite(writeQueue, data, ref position);
+                    }
+                }
+            }
+
+            writeQueue.Stop();
+        }
+
+        private static void EnqueueWrite(BlockingQueue<byte[]> writeQueue, byte[] data, ref long position)
+        {
+            while (writeQueue.Count > QueueSize)
+            {
+                Thread.Sleep(1);
+            }
+            writeQueue.Enqueue(data);
+            position += data.Length / BytesPerSector;
+        }
+
+        private static void WriteGrainTable(BlockingQueue<byte[]> writeQueue, byte[] grainTable, ref long position)
         {
             byte[] grainTableWithMarker = new byte[BytesPerSector + grainTable.Length];
             LittleEndianWriter.WriteUInt64(grainTableWithMarker, 0, (ulong)(grainTable.Length / BytesPerSector));
             LittleEndianWriter.WriteUInt32(grainTableWithMarker, 12, MarkerGT);
             ByteWriter.WriteBytes(grainTableWithMarker, BytesPerSector, grainTable);
-            
-            diskImageWriter.Write(grainTableWithMarker);
+
+            EnqueueWrite(writeQueue, grainTableWithMarker, ref position);
         }
 
-        private static void WriteGrainDirectory(DiskImageWriter diskImageWriter, byte[] grainDirectory)
+        private static void WriteGrainDirectory(BlockingQueue<byte[]> writeQueue, byte[] grainDirectory, ref long position)
         {
             int grainDirectorySectorCount = (int)Math.Ceiling((double)grainDirectory.Length / BytesPerSector);
             byte[] grainDirectoryWithMarker = new byte[(1 + grainDirectorySectorCount) * BytesPerSector];
@@ -196,7 +222,7 @@ namespace VmdkZeroFree
             LittleEndianWriter.WriteUInt32(grainDirectoryWithMarker, 12, MarkerGD);
             ByteWriter.WriteBytes(grainDirectoryWithMarker, BytesPerSector, grainDirectory);
 
-            diskImageWriter.Write(grainDirectoryWithMarker);
+            EnqueueWrite(writeQueue, grainDirectoryWithMarker, ref position);
         }
 
         private static byte[] GetGrainBytes(long sectorIndex, byte[] compressedData)
