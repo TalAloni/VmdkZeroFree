@@ -7,7 +7,7 @@
 using DiskAccessLibrary;
 using Utilities;
 
-namespace VmdkZeroFree
+namespace VmdkZeroFree.Lvm
 {
     public class LinuxLvmHelper
     {

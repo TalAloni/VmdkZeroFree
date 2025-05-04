@@ -12,6 +12,7 @@ using System.IO;
 using System.Threading;
 using Utilities;
 using VmdkZeroFree.Ext4;
+using VmdkZeroFree.Lvm;
 using VmdkZeroFree.Xfs;
 
 namespace VmdkZeroFree
