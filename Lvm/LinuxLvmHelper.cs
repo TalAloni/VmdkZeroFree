@@ -11,9 +11,9 @@ namespace VmdkZeroFree.Lvm
 {
     public class LinuxLvmHelper
     {
-        private const uint LvmSignature = 0xA92B4EFC;
-        private const ulong LvmLabelSignature = 0x454E4F4C4542414C; // "LABELONE"
         private const byte LinuxRaidPartitionType = 0xFD;
+        private const uint LvmSuperblockSignature = 0xA92B4EFC; // MD_SB_MAGIC
+        private const ulong LvmPhysicalVolumeLabelSignature = 0x454E4F4C4542414C; // "LABELONE"
 
         public static DiskExtent GetUnderlyingVolumeData(Disk disk, PartitionTableEntry partitionTableEntry)
         {
@@ -23,7 +23,7 @@ namespace VmdkZeroFree.Lvm
             {
                 byte[] possibleLvmSuperblockBytes = disk.ReadSector(partitionStartLBA + 8);
                 uint possibleLvmSuperblockSignature = LittleEndianConverter.ToUInt32(possibleLvmSuperblockBytes, 0);
-                if (possibleLvmSuperblockSignature == LvmSignature)
+                if (possibleLvmSuperblockSignature == LvmSuperblockSignature)
                 {
                     ulong dataOffset = LittleEndianConverter.ToUInt64(possibleLvmSuperblockBytes, 0x80);
                     partitionSizeLBA = (uint)LittleEndianConverter.ToUInt64(possibleLvmSuperblockBytes, 0x88);
@@ -32,7 +32,7 @@ namespace VmdkZeroFree.Lvm
                     byte[] possibleLvmLabelBytes = disk.ReadSector(partitionStartLBA + 1);
                     ulong possibleLvmLabelSignature = LittleEndianConverter.ToUInt64(possibleLvmLabelBytes, 0);
 
-                    if (possibleLvmLabelSignature == LvmLabelSignature)
+                    if (possibleLvmLabelSignature == LvmPhysicalVolumeLabelSignature)
                     {
                         // https://wiki.syslinux.org/wiki/index.php?title=Development/LVM_support
                         ulong actualDataOffset = LittleEndianConverter.ToUInt64(possibleLvmLabelBytes, 0x48);
