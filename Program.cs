@@ -7,6 +7,7 @@
 using DiskAccessLibrary;
 using DiskAccessLibrary.VMDK;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -161,10 +162,13 @@ namespace VmdkZeroFree
                 if (partitionTableEntry.PartitionType == LinuxRaidPartitionType ||
                     partitionTableEntry.PartitionType == LinuxNativePartitionType)
                 {
-                    DiskExtent volumeData = LinuxLvmHelper.GetUnderlyingVolumeData(disk, partitionTableEntry);
-                    if (volumeData.TotalSectors > 0)
+                    List<DiskExtent> volumes = LinuxLvmHelper.GetUnderlyingVolumes(disk, partitionTableEntry);
+                    foreach (DiskExtent volume in volumes)
                     {
-                        TrimUnusedBlocks(volumeData);
+                        if (volume.TotalSectors > 0)
+                        {
+                            TrimUnusedBlocks(volume);
+                        }
                     }
                 }
             }
