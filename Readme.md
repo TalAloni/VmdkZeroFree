@@ -8,6 +8,7 @@ Features:
 * Monolithic-sparse VMDK input/output  
 * Monolithic-flat VMDK input/output  
 * MBR partition table support  
+* GPT partition table support  
 * Basic Linux LVM volumes support  
 
 ##### Warning:  

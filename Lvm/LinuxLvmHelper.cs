@@ -20,24 +20,22 @@ namespace VmdkZeroFree.Lvm
         private const ulong Lvm2MetadataSignatureLow = 0x5B7820324D564C20; // LVM2 x[5A%r0N*>
         private const ulong Lvm2MetadataSignatureHigh = 0x3E2A4E3072254135;
 
-        public static List<DiskExtent> GetUnderlyingVolumes(Disk disk, PartitionTableEntry partitionTableEntry)
+        public static List<DiskExtent> GetUnderlyingVolumes(Disk disk, Partition partition)
         {
-            long partitionStartLBA = partitionTableEntry.FirstSectorLBA;
-            long partitionSizeLBA = partitionTableEntry.SectorCountLBA;
-            if (partitionTableEntry.SectorCountLBA > 0 && partitionTableEntry.PartitionType == LinuxRaidPartitionType)
+            if (partition is MBRPartition mbrPartition && mbrPartition.PartitionType == LinuxRaidPartitionType)
             {
-                byte[] possibleLvmSuperblockBytes = disk.ReadSector(partitionStartLBA + 8);
+                byte[] possibleLvmSuperblockBytes = disk.ReadSector(partition.FirstSector + 8);
                 uint possibleLvmSuperblockSignature = LittleEndianConverter.ToUInt32(possibleLvmSuperblockBytes, 0);
                 uint version = LittleEndianConverter.ToUInt32(possibleLvmSuperblockBytes, 0x04);
                 if (possibleLvmSuperblockSignature == LvmSuperblockSignature && version == 1)
                 {
-                    return GetUnderlyingLvmVolumes(disk, partitionStartLBA, possibleLvmSuperblockBytes);
+                    return GetUnderlyingLvmVolumes(disk, partition.FirstSector, possibleLvmSuperblockBytes);
                 }
             }
 
             return new List<DiskExtent>()
             {
-                new DiskExtent(disk, partitionStartLBA, partitionSizeLBA * disk.BytesPerSector)
+                new DiskExtent(disk, partition.FirstSector, partition.TotalSectors * disk.BytesPerSector)
             };
         }
 

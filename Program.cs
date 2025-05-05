@@ -25,6 +25,8 @@ namespace VmdkZeroFree
         private const int BlockSizeInSectors = 8;
         private const int QueueSize = 16;
 
+        private static readonly Guid LinuxDataPartitionTypeGuid = new Guid("0FC63DAF-8483-4772-8E79-3D69D8477DE4");
+
         static int Main(string[] args)
         {
             Version version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
@@ -155,14 +157,13 @@ namespace VmdkZeroFree
 
         private static void TrimUnusedBlocks(TrimmableDisk disk)
         {
-            MasterBootRecord mbr = new MasterBootRecord(disk.ReadSector(0));
-            for (int partitionTableEntryIndex = 0; partitionTableEntryIndex < 4; partitionTableEntryIndex++)
+            List<Partition> partitions = BasicDiskHelper.GetPartitions(disk);
+            foreach (Partition partition in partitions)
             {
-                PartitionTableEntry partitionTableEntry = mbr.PartitionTable[partitionTableEntryIndex];
-                if (partitionTableEntry.PartitionType == LinuxRaidPartitionType ||
-                    partitionTableEntry.PartitionType == LinuxNativePartitionType)
+                if ((partition is MBRPartition mbrPartition && (mbrPartition.PartitionType == LinuxRaidPartitionType || mbrPartition.PartitionType == LinuxNativePartitionType)) ||
+                    (partition is GPTPartition gptPartition && (gptPartition.TypeGuid == LinuxDataPartitionTypeGuid)))
                 {
-                    List<DiskExtent> volumes = LinuxLvmHelper.GetUnderlyingVolumes(disk, partitionTableEntry);
+                    List<DiskExtent> volumes = LinuxLvmHelper.GetUnderlyingVolumes(disk, partition);
                     foreach (DiskExtent volume in volumes)
                     {
                         if (volume.TotalSectors > 0)
