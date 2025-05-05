@@ -117,10 +117,9 @@ namespace VmdkZeroFree
         {
             VirtualMachineDisk inputDiskImage = new VirtualMachineDisk(sourcePath, true);
             if (inputDiskImage.DiskType == VirtualMachineDiskType.StreamOptimized &&
-                diskType == VirtualMachineDiskType.StreamOptimized &&
-                useFastestCompression)
+                diskType == VirtualMachineDiskType.StreamOptimized)
             {
-                TrimStreamOptimizedVmdk(inputDiskImage, outputPath);
+                TrimStreamOptimizedVmdk(inputDiskImage, outputPath, !useFastestCompression);
             }
             else
             {
@@ -241,7 +240,7 @@ namespace VmdkZeroFree
             writeQueue.Stop();
         }
 
-        public static void TrimStreamOptimizedVmdk(VirtualMachineDisk inputDiskImage, string outputPath)
+        public static void TrimStreamOptimizedVmdk(VirtualMachineDisk inputDiskImage, string outputPath, bool forceMaxCompression)
         {
             TrimmableDisk workDisk = new TrimmableDisk(inputDiskImage, BlockSizeInSectors);
             inputDiskImage.ExclusiveLock();
@@ -255,7 +254,7 @@ namespace VmdkZeroFree
             DiskImage outputDisk = RawDiskImage.Create(outputPath, 0);
             outputDisk.ExclusiveLock();
             DiskImageWriter outputDiskWriter = new DiskImageWriter(outputDisk);
-            StreamOptimizedVmdkTrimmer.CopyStreamOptimizedVmdk(inputDiskReader, workDisk, outputDiskWriter);
+            StreamOptimizedVmdkTrimmer.CopyStreamOptimizedVmdk(inputDiskReader, workDisk, outputDiskWriter, forceMaxCompression);
 
             inputDisk.ReleaseLock();
             outputDisk.ReleaseLock();

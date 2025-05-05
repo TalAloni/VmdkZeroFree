@@ -22,7 +22,7 @@ namespace VmdkZeroFree
         private const uint MarkerGD = 2;
         private const uint MarkerFooter = 3;
 
-        public static void CopyStreamOptimizedVmdk(DiskImageReader inputDiskReader, TrimmableDisk workDisk, DiskImageWriter outputDiskWriter)
+        public static void CopyStreamOptimizedVmdk(DiskImageReader inputDiskReader, TrimmableDisk workDisk, DiskImageWriter outputDiskWriter, bool forceMaxCompression)
         {
             byte[] headerBytes = inputDiskReader.ReadSector();
             SparseExtentHeader header = new SparseExtentHeader(headerBytes);
@@ -41,7 +41,7 @@ namespace VmdkZeroFree
             BlockingQueue<byte[]> writeQueue = new BlockingQueue<byte[]>();
             new Thread(delegate ()
             {
-                CopyStreamOptimizedVmdkData(header, processingQueue, workDisk, writeQueue);
+                CopyStreamOptimizedVmdkData(header, processingQueue, workDisk, writeQueue, forceMaxCompression);
             }
             ).Start();
 
@@ -94,7 +94,7 @@ namespace VmdkZeroFree
             processingQueue.Stop();
         }
 
-        private static void CopyStreamOptimizedVmdkData(SparseExtentHeader header, BlockingQueue<byte[]> processingQueue, TrimmableDisk workDisk, BlockingQueue<byte[]> writeQueue)
+        private static void CopyStreamOptimizedVmdkData(SparseExtentHeader header, BlockingQueue<byte[]> processingQueue, TrimmableDisk workDisk, BlockingQueue<byte[]> writeQueue, bool forceMaxCompression)
         {
             ulong numberOfGrains = header.Capacity / header.GrainSize;
             int numberOfGrainTables = (int)Math.Ceiling((double)numberOfGrains / header.NumGTEsPerGT);
@@ -142,16 +142,16 @@ namespace VmdkZeroFree
                         int grainIndexInGrainTable = (int)(grainIndex % header.NumGTEsPerGT);
                         LittleEndianWriter.WriteUInt32(nextGrainTable, grainIndexInGrainTable * 4, (uint)position);
 
-                        if (isCopiedAsIs)
+                        if (isCopiedAsIs && !forceMaxCompression)
                         {
                             EnqueueWrite(writeQueue, data, ref position);
                         }
-                        else if (isPartialTrim)
+                        else if (isPartialTrim || (isCopiedAsIs && forceMaxCompression))
                         {
                             byte[] decompressedData = ZLibCompressionHelper.Decompress(data, grainMarkerSize, (int)compressedSize, (int)header.GrainSize * 512);
-                            byte[] trimmedData = workDisk.ApplyTrim(decompressedData, (long)lba, (int)header.GrainSize);
-                            bool useFastestCompression = (data[grainMarkerSize + 1] == 0x01);
-                            byte[] compressedBytes = ZLibCompressionHelper.Compress(trimmedData, 0, trimmedData.Length, useFastestCompression);
+                            byte[] dataToCompress = isPartialTrim ? workDisk.ApplyTrim(decompressedData, (long)lba, (int)header.GrainSize) : decompressedData;
+                            bool useFastestCompression = forceMaxCompression ? false : (data[grainMarkerSize + 1] == 0x01);
+                            byte[] compressedBytes = ZLibCompressionHelper.Compress(dataToCompress, 0, dataToCompress.Length, useFastestCompression);
 
                             byte[] grainBytes = GetGrainBytes((long)lba, compressedBytes);
                             EnqueueWrite(writeQueue, grainBytes, ref position);
